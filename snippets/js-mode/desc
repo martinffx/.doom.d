@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: desc
+# key: desc
+# condition: t
+# --
+describe('$1', () => {
+    $0
+})
