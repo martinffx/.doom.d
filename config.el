@@ -1,3 +1,4 @@
+
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
 
 ;; Place your private configuration here! Remember, you do not need to run 'doom
@@ -28,13 +29,15 @@
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
-(setq doom-theme 'doom-vibrant)
+(setq doom-theme 'doom-moonlight)
 
 ;; If you use `org' and don't want your org files in the default location below,
 ;; change `org-directory'. It must be set before org loads!
 
 (setq
+ projectile-project-search-path '("~/code")
  org-directory "~/Dropbox/org"
+ deft-directory "~/Dropbox/org"
  +org-capture-todo-file "~/Dropbox/org/inbox.org"
  org-tag-alist (quote (("@errand" . ?e)
                        ("@office" . ?o)
@@ -48,11 +51,12 @@
  org-refile-targets '(("~/Dropbox/org/gtd.org" :maxlevel . 3)
                       ("~/Dropbox/org/someday.org" :level . 1)
                       ("~/Dropbox/org/tickler.org" :maxlevel . 2))
+ org-journal-date-prefix "#+TITLE: "
+ org-journal-file-format "%Y-%m-%d.org"
+ org-journal-date-format "%A, %d %B %Y"
  +notmuch-sync-backend 'offlineimap
- +notmuch-mail-folder "~/mail"
- cider-clojure-cli-parameters "-Adev")
-
-
+ +notmuch-mail-folder "~/mail" 
+ lsp-log-io 't)
 
 ;; This determines the style of line numbers in effect. If set to `nil', line
 ;; numbers are disabled. For relative line numbers, set this to `relative'.
@@ -75,6 +79,141 @@
 ;;
 ;; You can also try 'gd' (or 'C-c g d') to jump to their definition and see how
 ;; they are implemented.
+
+;; ORG MODE FUN!
+(use-package! org-roam
+  :commands (org-roam-insert org-roam-find-file org-roam org-roam-show-graph)
+  :init
+  (setq org-roam-directory "~/Dropbox/org/roam"
+        org-roam-graph-viewer "/usr/bin/open"
+        org-roam-db-gc-threshold most-positive-fixnum
+        org-roam-graph-exclude-matcher "private"
+        org-roam-tag-sources '(prop last-directory)
+        org-id-link-to-org-use-id t)
+        
+  (map! :leader
+        :prefix "r"
+        :desc "Org-Roam-Buffer"     "r" #'org-roam
+        :desc "Org-Roam-Today"      "t" #'org-roam-today
+        :desc "Org-Roam-Tomorrow"   "T" #'org-roam-tomorrow
+        :desc "Org-Roam-Insert"     "i" #'org-roam-insert
+        :desc "Org-Roam-Buffer"     "b" #'org-roam-switch-to-buffer
+        :desc "Org-Roam-Capture"    "c" #'org-roam-capture
+        :desc "Org-Roam-Find"       "/" #'org-roam-find-file
+        :desc "Org-Roam-Show-Graph" "g" #'org-roam-show-graph)
+  :config
+  (setq org-roam-capture-templates
+        '(("l" "lit" plain (function org-roam--capture-get-point)
+           "%?"
+           :file-name "lit/${slug}"
+           :head "#+setupfile:./hugo_setup.org
+#+hugo_slug: ${slug}
+#+title: ${title}\n"
+           :unnarrowed t)
+          ("c" "concept" plain (function org-roam--capture-get-point)
+           "%?"
+           :file-name "concepts/${slug}"
+           :head "#+setupfile:./hugo_setup.org
+#+hugo_slug: ${slug}
+#+title: ${title}\n"
+           :unnarrowed t)
+          ("p" "private" plain (function org-roam-capture--get-point)
+           "%?"
+           :file-name "private/${slug}"
+           :head "#+title: ${title}\n"
+           :unnarrowed t)))
+
+  (setq org-roam-capture-ref-templates
+        '(("r" "ref" plain (function org-roam-capture--get-point)
+           "%?"
+           :file-name "lit/${slug}"
+           :head "#+setupfile:./hugo_setup.org
+#+roam_key: ${ref}
+#+hugo_slug: ${slug}
+#+roam_tags: website
+#+title: ${title}
+- source :: ${ref}"
+           :unnarrowed t)))
+
+  (set-company-backend! 'org-mode '(company-capf)))
+
+(use-package! org-roam-protocol
+  :after org-protocol)
+
+(after! company
+  (map! "M-/" #'company-indent-or-complete-common))
+
+(after! (org-roam)
+  (winner-mode +1)
+  (map! :map winner-mode-map
+        "<M-right>" #'winner-redo
+        "<M-left>" #'winner-undo))
+
+(use-package! org-download
+  :commands
+  org-download-dnd
+  org-download-yank
+  org-download-screenshot
+  org-download-dnd-base64
+  :init
+  (map! :map org-mode-map
+        "s-Y" #'org-download-screenshot
+        "s-y" #'org-download-yank)
+  (pushnew! dnd-protocol-alist
+            '("^\\(?:https?\\|ftp\\|file\\|nfs\\):" . +org-dragndrop-download-dnd-fn)
+            '("^data:" . org-download-dnd-base64))
+  (advice-add #'org-download-enable :override #'ignore)
+  :config
+  (defun +org/org-download-method (link)
+    (let* ((filename
+            (file-name-nondirectory
+             (car (url-path-and-query
+                   (url-generic-parse-url link)))))
+           ;; Create folder name with current buffer name, and place in root dir
+           (dirname (concat "./images/"
+                            (replace-regexp-in-string " " "_"
+                                                      (downcase (file-name-base buffer-file-name)))))
+           (filename-with-timestamp (format "%s%s.%s"
+                                            (file-name-sans-extension filename)
+                                            (format-time-string org-download-timestamp)
+                                            (file-name-extension filename))))
+      (make-directory dirname t)
+      (expand-file-name filename-with-timestamp dirname)))
+  :config
+  (setq org-download-screenshot-method
+        (cond (IS-MAC "screencapture -i %s")
+              (IS-LINUX
+               (cond ((executable-find "maim")  "maim -u -s %s")
+                     ((executable-find "scrot") "scrot -s %s")))))
+  (setq org-download-method '+org/org-download-method))
+
+(after! org-journal
+  (setq org-journal-date-prefix "#+TITLE: "
+        org-journal-file-format "%Y-%m-%d.org"
+        org-journal-dir (file-truename "~/Dropbox/org/journal")
+        org-journal-carryover-items nil))
+
+;; (use-package! org-roam-server
+;;               :ensure t)
+
+;; https://github.com/org-roam/org-roam/issues/217
+(defun my-org-protocol-focus-advice (orig &rest args)
+  (x-focus-frame nil)
+  (apply orig args))
+
+(advice-add 'org-roam-protocol-open-ref :around
+            #'my-org-protocol-focus-advice)
+(advice-add 'org-roam-protocol-open-file :around
+            #'my-org-protocol-focus-advice)
+
+(use-package! deft
+      :after org
+      :bind
+      ("C-c n d" . deft)
+      :custom
+      (deft-recursive t)
+      (deft-use-filter-string-for-filename t)
+      (deft-default-extension "org"))
 
 (after! org-agenda
   (defun martinfx/org-agenda-skip-all-siblings-but-first ()
@@ -175,6 +314,13 @@
         "u" #'org-gcal-post-at-point
         "d" #'org-gcal-delete-at-point))
 
+
+(use-package! nov
+  :ensure t
+  :mode ("\\.epub\\'" . nov-mode)
+  :config
+  (setq nov-save-place-file (concat doom-cache-dir "nov-places")))
+
 ;; AVY
 (map! :leader
       :prefix "j"
@@ -188,6 +334,8 @@
   :if (executable-find "rg")
   :init
   (map! "M-s" #'deadgrep))
+
+(map! "C-s" 'counsel-grep-or-swiper)
 
 ;; projectile
 (map! :leader
@@ -238,3 +386,16 @@
     ("r" smerge-resolve)
     ("k" smerge-kill-current)
     ("q" nil "cancel" :color blue)))
+(custom-set-variables
+ ;; custom-set-variables was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(exec-path
+   '("/usr/local/opt/ncurses/bin" "/Users/martinrichards/.yarn/bin" "/Users/martinrichards/.config/yarn/global/node_modules/.bin" "/var/folders/cw/_r242fhd3rx137z9grp8bnjc0000gn/T/fnm-shell-4506475/bin" "/usr/local/opt/openssl/bin" "/usr/local/opt/avr-gcc@7/bin" "/Users/martinrichards/.cargo/bin" "/Users/martinrichards/.bloop" "/Users/martinrichards/.bin" nil nil nil "/usr/local/bin" "/Users/martinrichards/.rbenv/shims" "/Users/martinrichards/.rbenv/bin" "/Users/martinrichards/.pyenv/shims" "/Users/martinrichards/.pyenv/bin" "/Users/martinrichards/.jenv/shims" "/Users/martinrichards/.jenv/bin" "/Users/martinrichards/.jenv/shims" "/usr/local/Cellar/tmux/3.0a_1/bin" "/usr/local/Cellar/emacs-plus/26.3/bin" "/usr/local/opt/ncurses/bin" "/Users/martinrichards/.yarn/bin" "/Users/martinrichards/.config/yarn/global/node_modules/.bin" "/var/folders/cw/_r242fhd3rx137z9grp8bnjc0000gn/T/fnm-shell-7919629/bin" "/usr/local/opt/openssl/bin" "/usr/local/opt/avr-gcc@7/bin" "/Users/martinrichards/.cargo/bin" "/Users/martinrichards/.bloop" "/Users/martinrichards/.bin" "/usr/local/bin" "/Users/martinrichards/.rbenv/shims" "/Users/martinrichards/.rbenv/bin" "/Users/martinrichards/.pyenv/shims" "/Users/martinrichards/.pyenv/bin" "/Users/martinrichards/.jenv/shims" "/Users/martinrichards/.jenv/bin" "/Users/martinrichards/.jenv/shims" "/usr/local/Cellar/tmux/3.0a_1/bin" "/usr/local/Cellar/emacs-plus/26.3/bin" "/Users/martinrichards/.cargo/bin" "/usr/local/bin" "/usr/local/sbin" "/usr/bin" "/bin" "/usr/sbin" "/sbin" "/usr/local/share/dotnet" "~/.dotnet/tools" "/Users/martinrichards/.pyenv/shims" "/usr/local/opt/ncurses/bin" "/Users/martinrichards/.yarn/bin" "/Users/martinrichards/.config/yarn/global/node_modules/.bin" "/var/folders/cw/_r242fhd3rx137z9grp8bnjc0000gn/T/fnm-shell-7934330/bin" "/usr/local/opt/openssl/bin" "/usr/local/opt/avr-gcc@7/bin" "/Users/martinrichards/.cargo/bin" "/Users/martinrichards/.bloop" "/Users/martinrichards/.bin" "/Users/martinrichards/.rbenv/shims" "/Users/martinrichards/.rbenv/bin" "/Users/martinrichards/.pyenv/bin" "/Users/martinrichards/.jenv/shims" "/Users/martinrichards/.jenv/bin" "/usr/local/Cellar/tmux/3.0a_1/bin" "/Applications/kitty.app/Contents/MacOS" "/usr/local/bin")))
+(custom-set-faces
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ )
