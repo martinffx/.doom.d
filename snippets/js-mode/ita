@@ -1,0 +1,8 @@
+# -*- mode: snippet -*-
+# name: it async
+# key: ita
+# condition: t
+# --
+it('$1', async () => {
+  $0
+})

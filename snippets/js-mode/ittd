@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: it todo
+# key: ittd
+# condition: t
+# --
+it.todo('$0')
